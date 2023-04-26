@@ -1,65 +1,131 @@
-import Notiflix from 'notiflix';
-import { fetchingImages } from './api';
+import { SearchImageApi } from './api';
+import { Notify } from 'notiflix/build/notiflix-notify-aio';
+import SimpleLightbox from 'simplelightbox';
+import 'simplelightbox/dist/simple-lightbox.min.css';
 
-// const form = document.querySelector('.search-form')
-const form = document.getElementById('search-form')
-const searchButton = document.querySelector('.search-button');
-const input = document.querySelector('.search-input')
-const gallery = document.querySelector('.gallery')
+const refs = {
+  form: document.getElementById('search-form'),
+  gallery: document.querySelector('.gallery'),
+  input: document.querySelector('input'),
+  loadMoreBtn: document.querySelector('.load-more'),
+};
 
-form.addEventListener('submit', onSubmit)
+const searchImageApi = new SearchImageApi();
 
-function onSubmit(e) {
-    e.preventDefault()
+refs.form.addEventListener('submit', onSearch);
+refs.loadMoreBtn.addEventListener('click', onLoadMore);
+refs.gallery.addEventListener('click', onImgClick);
 
-    const inputValue = input.value.trim();
-    console.log(inputValue);
+function onSearch(evt) {
+  evt.preventDefault();
 
-    if (!inputValue) { 
-        return; 
+  searchImageApi.query = evt.currentTarget.elements.searchQuery.value.trim();
+  searchImageApi.resetPage();
+  clearMarkup();
+  inactiveLoadmore();
+
+  searchImageApi
+    .getImage()
+    .then(res => {
+      const imagesArray = res.data.hits;
+      const totalQuantity = res.data.totalHits;
+
+      if (imagesArray.length === 0) {
+        Notify.warning(
+          'Sorry, there are no images matching your search query. Please try again.'
+        );
+        return;
       }
-
-    fetchingImages(inputValue).then(data => {
-        const returnedResult = data.hits
-        console.log(returnedResult);
-
-        const totalHits = data.totalHits;
-        if (returnedResult.length === 0) {
-            Notiflix.Notify.failure('Sorry, there are no images matching your search query. Please try again.')
-        } else if(returnedResult.length >= 1) {
-            const createdMarkup = returnedResult.reduce((acc, card) => acc + renderPictureCard(card), '');
-        gallery.insertAdjacentHTML('beforeend', createdMarkup);
-        Notiflix.Notify.success(`Hooray! We found ${totalHits} images.`)
-        }
+      Notify.success(`Hooray! We found ${totalQuantity} images.`);
+      activeLoadmore();
+      searchImageApi.incrementPage();
+      makeMarkup(imagesArray);
     })
-    .catch(error => {
-        if (error.message === '404') {
-            Notiflix.Notify.failure("Oops, no data was found!");
-        }
-        console.log(error);
+    .catch(err => console.log(err))
+    .finally(() => {
+      refs.input.value = '';
     });
+}
 
- }
+function onLoadMore() {
+  searchImageApi
+    .getImage()
+    .then(res => {
+      const totalQuantity = res.data.totalHits;
+      console.log(totalQuantity);
+      console.log(res);
+      const imagesArray = res.data.hits;
+      searchImageApi.incrementPage();
+      if (imagesArray.length === 0) {
+        Notify.warning(
+          "We're sorry, but you've reached the end of search results."
+        );
+        inactiveLoadmore();
+      }
+      makeMarkup(imagesArray);
+    })
+    .catch(err => console.log(err));
+}
 
-//  function renderPicture({ webformatURL, largeImageURL, tags, likes, views, comments, downloads }) {
-    function renderPictureCard({ webformatURL, tags, likes, views, comments, downloads }) {
-    return `
-    <div class="photo-card">
-  <img width=250 height=150 src=${webformatURL} alt="${tags}" loading="lazy" />
-  <div class="info">
-    <p class="info-item">
-      <b>Likes: ${likes}</b>
-    </p>
-    <p class="info-item">
-      <b>Views: ${views}</b>
-    </p>
-    <p class="info-item">
-      <b>Comments: ${comments}</b>
-    </p>
-    <p class="info-item">
-      <b>Downloads: ${downloads}</b>
-    </p>
-  </div>
-</div>
-    `
- }
+function makeMarkup(response) {
+  const markup = response
+    .map(
+      ({
+        largeImageURL,
+        webformatURL,
+        tags,
+        likes,
+        views,
+        comments,
+        downloads,
+      }) => {
+        return `<div class="photo-card">
+        <img width=250 height=150 src=${webformatURL} alt="${tags}" loading="lazy" />
+        <div class="info">
+          <p class="info-item">
+            <b>Likes: ${likes}</b>
+          </p>
+          <p class="info-item">
+            <b>Views: ${views}</b>
+          </p>
+          <p class="info-item">
+            <b>Comments: ${comments}</b>
+          </p>
+          <p class="info-item">
+            <b>Downloads: ${downloads}</b>
+          </p>
+        </div>
+      </div>`;
+      }
+    )
+    .join('');
+  refs.gallery.insertAdjacentHTML('beforeend', markup);
+}
+
+function clearMarkup() {
+  refs.gallery.innerHTML = '';
+}
+
+function activeLoadmore() {
+    refs.loadMoreBtn.disabled = false;
+    refs.loadMoreBtn.classList.remove('is-hidden')
+}
+
+function inactiveLoadmore() {
+  refs.loadMoreBtn.disabled = true;
+  refs.loadMoreBtn.classList.add('is-hidden');
+}
+
+function onImgClick(event) {
+  if (event.target.className !== 'gallery__image') {
+    return;
+  }
+  event.preventDefault();
+
+  let modal = new SimpleLightbox('.gallery a', {
+    captionsData: 'alt',
+    captionDelay: 250,
+    scrollZoom: false,
+  });
+  modal.refresh();
+}
