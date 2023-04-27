@@ -1,131 +1,155 @@
-import { SearchImageApi } from './api';
-import { Notify } from 'notiflix/build/notiflix-notify-aio';
-import SimpleLightbox from 'simplelightbox';
+import './css/style.css';
+import fetchPictures from './fetchPictures';
+import { Notify } from 'notiflix';
 import 'simplelightbox/dist/simple-lightbox.min.css';
+import SimpleLightbox from 'simplelightbox';
 
-const refs = {
-  form: document.getElementById('search-form'),
-  gallery: document.querySelector('.gallery'),
-  input: document.querySelector('input'),
-  loadMoreBtn: document.querySelector('.load-more'),
-};
+const lightbox = new SimpleLightbox('.photo-card', {
+  sourceAttr: 'data-image',
+  captionsData: 'alt',
+});
 
-const searchImageApi = new SearchImageApi();
+const gallery = document.querySelector('.gallery');
+const form = document.querySelector('.search-form');
+const buttonLoad = document.querySelector('.load-more');
 
-refs.form.addEventListener('submit', onSearch);
-refs.loadMoreBtn.addEventListener('click', onLoadMore);
-refs.gallery.addEventListener('click', onImgClick);
+form.addEventListener('submit', onSubmit);
+buttonLoad.addEventListener('click', onLoadMore);
 
-function onSearch(evt) {
-  evt.preventDefault();
+let page = 1;
+let category = '';
 
-  searchImageApi.query = evt.currentTarget.elements.searchQuery.value.trim();
-  searchImageApi.resetPage();
-  clearMarkup();
-  inactiveLoadmore();
-
-  searchImageApi
-    .getImage()
-    .then(res => {
-      const imagesArray = res.data.hits;
-      const totalQuantity = res.data.totalHits;
-
-      if (imagesArray.length === 0) {
-        Notify.warning(
+async function onSubmit(event) {
+  event.preventDefault();
+  const inputValue = event.target.searchQuery.value;
+  clearInfo();
+  if (inputValue) {
+    buttonLoad.classList.add('hidden');
+    try {
+      const { hits, totalHits } = await fetchPictures(inputValue);
+      if (hits.length === 0) {
+        Notify.failure(
           'Sorry, there are no images matching your search query. Please try again.'
         );
+        clearInfo();
         return;
       }
-      Notify.success(`Hooray! We found ${totalQuantity} images.`);
-      activeLoadmore();
-      searchImageApi.incrementPage();
-      makeMarkup(imagesArray);
-    })
-    .catch(err => console.log(err))
-    .finally(() => {
-      refs.input.value = '';
-    });
+      category = inputValue;
+      putPictures(hits);
+      !(totalHits <= hits.length) && buttonLoad.classList.remove('hidden');
+      Notify.success(`Hooray! We found ${totalHits} images.`);
+    } catch (err) {
+      Notify.failure('Oops, something went wrong...');
+    }
+  }
 }
 
-function onLoadMore() {
-  searchImageApi
-    .getImage()
-    .then(res => {
-      const totalQuantity = res.data.totalHits;
-      console.log(totalQuantity);
-      console.log(res);
-      const imagesArray = res.data.hits;
-      searchImageApi.incrementPage();
-      if (imagesArray.length === 0) {
-        Notify.warning(
-          "We're sorry, but you've reached the end of search results."
-        );
-        inactiveLoadmore();
-      }
-      makeMarkup(imagesArray);
-    })
-    .catch(err => console.log(err));
+function clearInfo() {
+  page = 1;
+  category = '';
+  gallery.replaceChildren();
 }
 
-function makeMarkup(response) {
-  const markup = response
+function putPictures(pictures) {
+  const listHTML = pictures
     .map(
       ({
-        largeImageURL,
         webformatURL,
+        largeImageURL,
         tags,
         likes,
         views,
         comments,
         downloads,
-      }) => {
-        return `<div class="photo-card">
-        <img width=250 height=150 src=${webformatURL} alt="${tags}" loading="lazy" />
-        <div class="info">
-          <p class="info-item">
-            <b>Likes: ${likes}</b>
-          </p>
-          <p class="info-item">
-            <b>Views: ${views}</b>
-          </p>
-          <p class="info-item">
-            <b>Comments: ${comments}</b>
-          </p>
-          <p class="info-item">
-            <b>Downloads: ${downloads}</b>
-          </p>
-        </div>
-      </div>`;
-      }
+      }) =>
+        `<div class="photo-card" data-image=${largeImageURL}>
+          <img class="gallery-image"src ="${webformatURL}" alt="${tags}" loading="lazy" />
+          <div class="info">
+            <p class="info-item">
+              <b>Likes</b>
+              ${likes}
+            </p>
+            <p class="info-item">
+              <b>Views</b>
+              ${views}
+            </p>
+            <p class="info-item">
+              <b>Comments</b>
+              ${comments}
+            </p>
+            <p class="info-item">
+              <b>Downloads</b>
+              ${downloads}
+            </p>
+          </div>
+        </div>`
     )
     .join('');
-  refs.gallery.insertAdjacentHTML('beforeend', markup);
+  gallery.insertAdjacentHTML('beforeend', listHTML);
+  lightbox.refresh();
 }
 
-function clearMarkup() {
-  refs.gallery.innerHTML = '';
-}
-
-function activeLoadmore() {
-    refs.loadMoreBtn.disabled = false;
-    refs.loadMoreBtn.classList.remove('is-hidden')
-}
-
-function inactiveLoadmore() {
-  refs.loadMoreBtn.disabled = true;
-  refs.loadMoreBtn.classList.add('is-hidden');
-}
-
-function onImgClick(event) {
-  if (event.target.className !== 'gallery__image') {
-    return;
+async function onLoadMore() {
+  try {
+    page += 1;
+    const { hits, totalHits } = await fetchPictures(category, page);
+    putPictures(hits);
+    if (isEnd(totalHits, page)) {
+      Notify.info(
+        'We are sorry, but you have reached the end of search results.'
+      );
+      buttonLoad.classList.add('hidden');
+    }
+    autoScroll();
+  } catch (e) {
+    Notify.failure('Oops, something went wrong...');
   }
-  event.preventDefault();
-
-  let modal = new SimpleLightbox('.gallery a', {
-    captionsData: 'alt',
-    captionDelay: 250,
-    scrollZoom: false,
-  });
-  modal.refresh();
 }
+
+function isEnd(totalHits, page) {
+  return Math.ceil(totalHits / 40) === page;
+}
+
+function autoScroll() {
+  const { height: cardHeight } =
+    gallery.firstElementChild.getBoundingClientRect();
+  window.scrollBy({
+    top: cardHeight * 2,
+    behavior: 'smooth',
+  });
+}
+
+/* fetchPictures('asdsadasdasdsadaasadasd', 1).then(pictures => {
+  console.log(pictures);
+}); */
+
+// fetch + then
+
+/* fetchPictures(inputValue)
+      .then(pictures => {
+        if (pictures.hits.length === 0) {
+          Notify.failure(
+            'Sorry, there are no images matching your search query. Please try again.'
+          );
+          clearInfo();
+          return;
+        }
+        category = inputValue;
+        putPictures(pictures.hits);
+        buttonLoad.classList.remove('hidden');
+      })
+      .catch(err => {
+        console.error(err);
+        Notify.failure('Oops, there is no country with that name');
+      }); */
+
+/*
+  fetchPictures(category, page).then(pictures => {
+    putPictures(pictures.hits);
+    if (isEnd(pictures.totalHits, page)) {
+      Notify.info(
+        'We are sorry, but you have reached the end of search results.'
+      );
+      buttonLoad.classList.add('hidden');
+    }
+  }); */
